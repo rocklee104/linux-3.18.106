@@ -106,11 +106,13 @@ static void bdi_queue_work(struct backing_dev_info *bdi,
 
 	spin_lock_bh(&bdi->wb_lock);
 	if (!test_bit(BDI_registered, &bdi->state)) {
+		/* 如果bdi没有register,那么直接唤醒在等待done的进程 */
 		if (work->done)
 			complete(work->done);
 		goto out_unlock;
 	}
 	list_add_tail(&work->list, &bdi->work_list);
+	/* 会调用到 bdi_writeback_workfn, */
 	mod_delayed_work(bdi_wq, &bdi->wb.dwork, 0);
 out_unlock:
 	spin_unlock_bh(&bdi->wb_lock);
@@ -207,9 +209,11 @@ static void redirty_tail(struct inode *inode, struct bdi_writeback *wb)
 		struct inode *tail;
 
 		tail = wb_inode(wb->b_dirty.next);
+		/* 如果inode比b_dirty上最新的inode旧,就更新这个inode的时间戳 */
 		if (time_before(inode->dirtied_when, tail->dirtied_when))
 			inode->dirtied_when = jiffies;
 	}
+	/* 将这个inode头插到b_dirty队列上 */
 	list_move(&inode->i_wb_list, &wb->b_dirty);
 }
 
@@ -262,11 +266,14 @@ static int move_expired_inodes(struct list_head *delaying_queue,
 	int do_sb_sort = 0;
 	int moved = 0;
 
+	/* delaying_queue上的inode最尾部的inode是最早dirty的 */
 	while (!list_empty(delaying_queue)) {
 		inode = wb_inode(delaying_queue->prev);
+		/* 如果inode比work dirty的时间要晚 */
 		if (work->older_than_this &&
 		    inode_dirtied_after(inode, *work->older_than_this))
 			break;
+		/* 如果inode比work dirty的时间要早,将delaying_queue上的inode头插到tmp */
 		list_move(&inode->i_wb_list, &tmp);
 		moved++;
 		if (sb_is_blkdev_sb(inode->i_sb))
@@ -278,12 +285,15 @@ static int move_expired_inodes(struct list_head *delaying_queue,
 
 	/* just one sb in list, splice to dispatch_queue and we're done */
 	if (!do_sb_sort) {
+		/* 将整个tmp上的成员移动到dispatch_queue */
 		list_splice(&tmp, dispatch_queue);
 		goto out;
 	}
 
 	/* Move inodes from one superblock together */
+	/* 将相同sb的inode放到一起 */
 	while (!list_empty(&tmp)) {
+		/* 最后的inode,dirty的时间是最早的 */
 		sb = wb_inode(tmp.prev)->i_sb;
 		list_for_each_prev_safe(pos, node, &tmp) {
 			inode = wb_inode(pos);
@@ -310,7 +320,9 @@ static void queue_io(struct bdi_writeback *wb, struct wb_writeback_work *work)
 {
 	int moved;
 	assert_spin_locked(&wb->list_lock);
+	/* 将b_more_io上的inode移动到b_io上 */
 	list_splice_init(&wb->b_more_io, &wb->b_io);
+	/* 将b_dirty上的inode移动到b_io上 */
 	moved = move_expired_inodes(&wb->b_dirty, &wb->b_io, work);
 	trace_writeback_queue_io(wb, work, moved);
 }
@@ -468,6 +480,7 @@ __writeback_single_inode(struct inode *inode, struct writeback_control *wbc)
 	 * inode metadata is written back correctly.
 	 */
 	if (wbc->sync_mode == WB_SYNC_ALL && !wbc->for_sync) {
+		/* sync(2)的时候,不需要写一个文件,然后同步等.而是写所有文件,然后集中等 */
 		int err = filemap_fdatawait(mapping);
 		if (ret == 0)
 			ret = err;
@@ -629,6 +642,7 @@ static long writeback_sb_inodes(struct super_block *sb,
 	long wrote = 0;  /* count both pages and inodes */
 
 	while (!list_empty(&wb->b_io)) {
+		/* 从最旧的dirty inode开始 */
 		struct inode *inode = wb_inode(wb->b_io.prev);
 
 		if (inode->i_sb != sb) {
@@ -671,6 +685,10 @@ static long writeback_sb_inodes(struct super_block *sb,
 			 * We'll have another go at writing back this inode
 			 * when we completed a full scan of b_io.
 			 */
+			/*
+			 * 如果inode正在回写,并且当前wbc是WB_SYNC_NONE的,
+			 * 就将这个inode移动到b_more_io上,wb_writeback会在下一轮loop处理它
+			 */
 			spin_unlock(&inode->i_lock);
 			requeue_io(inode, wb);
 			trace_writeback_sb_inodes_requeue(inode);
@@ -684,12 +702,14 @@ static long writeback_sb_inodes(struct super_block *sb,
 		 * WB_SYNC_ALL case.
 		 */
 		if (inode->i_state & I_SYNC) {
+			/* 如果有WB_SYNC_ALL,只能force wait */
 			/* Wait for I_SYNC. This function drops i_lock... */
 			inode_sleep_on_writeback(inode);
 			/* Inode may be gone, start again */
 			spin_lock(&wb->list_lock);
 			continue;
 		}
+		/* 准备真正的写入 */
 		inode->i_state |= I_SYNC;
 		spin_unlock(&inode->i_lock);
 
@@ -863,6 +883,7 @@ static long wb_writeback(struct bdi_writeback *wb,
 		 * so that e.g. sync can proceed. They'll be restarted
 		 * after the other works are all done.
 		 */
+		/* 如果有显式任务回写(sync),那么后台回写任务就退出.下次会继续回写 */
 		if ((work->for_background || work->for_kupdate) &&
 		    !list_empty(&wb->bdi->work_list))
 			break;
@@ -871,6 +892,7 @@ static long wb_writeback(struct bdi_writeback *wb,
 		 * For background writeout, stop when we are below the
 		 * background dirty threshold
 		 */
+		/* 脏页在thresh一下,就停止后台回写 */
 		if (work->for_background && !over_bground_thresh(wb->bdi))
 			break;
 
@@ -881,9 +903,11 @@ static long wb_writeback(struct bdi_writeback *wb,
 		 * safe.
 		 */
 		if (work->for_kupdate) {
+			/* 早于oldest_jif的inode不需要回写 */
 			oldest_jif = jiffies -
 				msecs_to_jiffies(dirty_expire_interval * 10);
 		} else if (work->for_background)
+			/* 如果是后台回写,全都需要回写 */
 			oldest_jif = jiffies;
 
 		trace_writeback_start(wb->bdi, work);
@@ -910,6 +934,7 @@ static long wb_writeback(struct bdi_writeback *wb,
 		/*
 		 * No more inodes for IO, bail
 		 */
+		/* 如果b_more_io都为空,那确实没啥要写的了 */
 		if (list_empty(&wb->b_more_io))
 			break;
 		/*
@@ -1023,6 +1048,7 @@ static long wb_do_writeback(struct bdi_writeback *wb)
 	long wrote = 0;
 
 	set_bit(BDI_writeback_running, &wb->bdi->state);
+	/* 处理显式任务 */
 	while ((work = get_next_work_item(bdi)) != NULL) {
 
 		trace_writeback_exec(bdi, work);
@@ -1033,6 +1059,7 @@ static long wb_do_writeback(struct bdi_writeback *wb)
 		 * Notify the caller of completion if this is a synchronous
 		 * work item, otherwise just free it.
 		 */
+		/* 通知等待done的进程,writeback完成(不一定落盘) */
 		if (work->done)
 			complete(work->done);
 		else
@@ -1042,6 +1069,7 @@ static long wb_do_writeback(struct bdi_writeback *wb)
 	/*
 	 * Check for periodic writeback, kupdated() style
 	 */
+	/* 处理隐式任务 */
 	wrote += wb_check_old_data_flush(wb);
 	wrote += wb_check_background_flush(wb);
 	clear_bit(BDI_writeback_running, &wb->bdi->state);
@@ -1071,6 +1099,7 @@ void bdi_writeback_workfn(struct work_struct *work)
 		 * if @bdi is shutting down even when we're running off the
 		 * rescuer as work_list needs to be drained.
 		 */
+		/* 普通回写(或者bdi unregistered)会走到这个路径 */
 		do {
 			pages_written = wb_do_writeback(wb);
 			trace_writeback_pages_written(pages_written);
@@ -1081,14 +1110,17 @@ void bdi_writeback_workfn(struct work_struct *work)
 		 * the emergency worker.  Don't hog it.  Hopefully, 1024 is
 		 * enough for efficient IO.
 		 */
+		/* 当worker线程不够的情况下,启用rescuer线程回写 */
 		pages_written = writeback_inodes_wb(&bdi->wb, 1024,
 						    WB_REASON_FORKER_THREAD);
 		trace_writeback_pages_written(pages_written);
 	}
 
+	/* 如果还有显式回写任务,那么就立即执行显式回写任务 */
 	if (!list_empty(&bdi->work_list))
 		mod_delayed_work(bdi_wq, &wb->dwork, 0);
 	else if (wb_has_dirty_io(wb) && dirty_writeback_interval)
+		/* 如果没有显式回写任务,只有隐式回写任务,就延时queue work */
 		bdi_wakeup_thread_delayed(bdi);
 
 	current->flags &= ~PF_SWAPWRITE;
@@ -1410,6 +1442,7 @@ void sync_inodes_sb(struct super_block *sb)
 		.range_cyclic	= 0,
 		.done		= &done,
 		.reason		= WB_REASON_SYNC,
+		/* 很关键的地方,设置以后,__writeback_single_inode就不会同步等 */
 		.for_sync	= 1,
 	};
 
@@ -1419,8 +1452,10 @@ void sync_inodes_sb(struct super_block *sb)
 	WARN_ON(!rwsem_is_locked(&sb->s_umount));
 
 	bdi_queue_work(sb->s_bdi, &work);
+	/* 确保work被执行(不一定真的写入,即便有WB_SYNC_ALL,但是设置了for_sync,不会同步等) */
 	wait_for_completion(&done);
 
+	/* 等待address mapping中所有页面被写入,这个时候才是真正的写入 */
 	wait_sb_inodes(sb);
 }
 EXPORT_SYMBOL(sync_inodes_sb);

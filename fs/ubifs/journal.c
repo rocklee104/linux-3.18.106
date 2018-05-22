@@ -132,6 +132,7 @@ again:
 		goto out_unlock;
 	}
 
+	/* 如果wbuf中剩下的空间可以满足len */
 	avail = c->leb_size - wbuf->offs - wbuf->used;
 	if (wbuf->lnum != -1 && avail >= len)
 		return 0;
@@ -153,6 +154,7 @@ again:
 	 * some. But the write-buffer mutex has to be unlocked because
 	 * GC also takes it.
 	 */
+	/* 如果没flash上没有空闲的空间,就触发gc */
 	dbg_jnl("no free space in jhead %s, run GC", dbg_jhead(jhead));
 	mutex_unlock(&wbuf->io_mutex);
 
@@ -790,6 +792,7 @@ int ubifs_jnl_write_inode(struct ubifs_info *c, const struct inode *inode)
 	 * need to synchronize the write-buffer either.
 	 */
 	if (!last_reference) {
+		/* 如果inode没有被删除 */
 		len += ui->data_len;
 		sync = IS_SYNC(inode);
 	}
@@ -812,6 +815,7 @@ int ubifs_jnl_write_inode(struct ubifs_info *c, const struct inode *inode)
 	release_head(c, BASEHD);
 
 	if (last_reference) {
+		/* inode被删除 */
 		err = ubifs_tnc_remove_ino(c, inode->i_ino);
 		if (err)
 			goto out_ro;

@@ -1713,6 +1713,7 @@ struct super_operations {
 #define I_FREEING		(1 << 5)
 #define I_CLEAR			(1 << 6)
 #define __I_SYNC		7
+/* 表示inode正在同步(回写) */
 #define I_SYNC			(1 << __I_SYNC)
 #define I_REFERENCED		(1 << 8)
 #define __I_DIO_WAKEUP		9

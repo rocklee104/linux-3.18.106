@@ -108,6 +108,7 @@ SYSCALL_DEFINE0(sync)
 	iterate_supers(sync_fs_one_sb, &nowait);
 	iterate_supers(sync_fs_one_sb, &wait);
 	iterate_bdevs(fdatawrite_one_bdev, NULL);
+	/* 等待fdatawrite_one_bdev中数据回写完成 */
 	iterate_bdevs(fdatawait_one_bdev, NULL);
 	if (unlikely(laptop_mode))
 		laptop_sync_completion();

@@ -259,6 +259,7 @@ static int __init default_bdi_init(void)
 {
 	int err;
 
+	/* 初始化writeback工作队列,unbond类型 */
 	bdi_wq = alloc_workqueue("writeback", WQ_MEM_RECLAIM | WQ_FREEZABLE |
 					      WQ_UNBOUND | WQ_SYSFS, 0);
 	if (!bdi_wq)
@@ -440,6 +441,7 @@ int bdi_init(struct backing_dev_info *bdi)
 	INIT_LIST_HEAD(&bdi->bdi_list);
 	INIT_LIST_HEAD(&bdi->work_list);
 
+	/* 设置bdi的wb */
 	bdi_wb_init(&bdi->wb, bdi);
 
 	for (i = 0; i < NR_BDI_STAT_ITEMS; i++) {

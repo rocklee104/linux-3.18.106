@@ -414,6 +414,7 @@ const struct ubifs_lprops *do_find_free_space(struct ubifs_info *c,
 	int err, i;
 
 	if (squeeze) {
+		/* 尝试从非空的leb中找空闲空间 */
 		lprops = ubifs_fast_find_free(c);
 		if (lprops && lprops->free >= min_space)
 			return lprops;

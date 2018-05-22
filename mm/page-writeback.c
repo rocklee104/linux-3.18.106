@@ -98,6 +98,7 @@ unsigned long vm_dirty_bytes;
 /*
  * The interval between `kupdate'-style writebacks
  */
+/* 5s回写一次,centiseconds厘秒 */
 unsigned int dirty_writeback_interval = 5 * 100; /* centiseconds */
 
 EXPORT_SYMBOL_GPL(dirty_writeback_interval);
@@ -105,6 +106,7 @@ EXPORT_SYMBOL_GPL(dirty_writeback_interval);
 /*
  * The longest time for which data is allowed to remain dirty
  */
+/* 超过30的inode都需要回写 */
 unsigned int dirty_expire_interval = 30 * 100; /* centiseconds */
 
 /*

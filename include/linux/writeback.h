@@ -32,7 +32,9 @@ struct backing_dev_info;
  * fs/fs-writeback.c
  */
 enum writeback_sync_modes {
+	/* 如果遇到page被lock,不等待,直接跳过 */
 	WB_SYNC_NONE,	/* Don't wait on anything */
+	/* 写入过程如果遇到lock,需要阻塞等待.WB_SYNC_ALL保证数据submit,但不保证一定写入 */
 	WB_SYNC_ALL,	/* Wait on every mapping */
 };
 

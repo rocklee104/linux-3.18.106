@@ -1752,6 +1752,7 @@ static int __block_write_full_page(struct inode *inode, struct page *page,
 		 * higher-level throttling.
 		 */
 		if (wbc->sync_mode != WB_SYNC_NONE) {
+			/* 如果WB_SYNC_ALL,不惜等待也要将bh lock */
 			lock_buffer(bh);
 		} else if (!trylock_buffer(bh)) {
 			redirty_page_for_writepage(wbc, page);
